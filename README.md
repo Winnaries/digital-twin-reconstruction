@@ -1,0 +1,3 @@
+### 3D Reconstruction for Digital Twin Application
+
+Staggeringly high investment has been a key issue that hinders the adoption of digital twin. To solve the issue, we have been researching and developing an automatic pipeline for building a 3D space from crowd sourcing images (inspired by the emergence of radiance fields and Block-NeRF in particular). This repository is separated into 4 main parts: (1) the datasets, (2) geospatial indexing, (3) camera pose inference, and (4) neural reconstruction. Currently, this project only aim to build a proof-of-concept kind of product for automatic reconstruction and therefore does not provide any integration with clouds or commercial deployment (our future works).
