@@ -172,6 +172,7 @@ dependencies = [
  "image",
  "imageproc",
  "ndarray",
+ "num",
 ]
 
 [[package]]

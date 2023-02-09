@@ -2,6 +2,7 @@ use image::{io::Reader as ImageReader};
 use std::env;
 use proc::{gaussian_blur, embed, discretize, down_sample}; 
 
+mod sift; 
 mod proc; 
 mod octave; 
 

@@ -39,7 +39,7 @@ pub fn normalize(image: &MatrixAsImage) -> MatrixAsImage {
 pub fn gaussian_blur(image: &MatrixAsImage, sigma: f32) -> MatrixAsImage {
     let n = 2 * sigma.ceil() as u32;
     let kernel = gaussian_kernel(n, sigma);
-    convolve(image, &kernel)
+    normalize(&convolve(image, &kernel))
 }
 
 pub fn gaussian_kernel(n: u32, sigma: f32) -> MatrixAsImage {
