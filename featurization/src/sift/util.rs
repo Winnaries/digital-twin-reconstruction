@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use ndarray::{s, Array, ArrayBase, ArrayView, Ix2};
 
 /// Resample image using bilinear interpolation.

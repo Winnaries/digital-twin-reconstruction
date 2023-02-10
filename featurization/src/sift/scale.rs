@@ -1,8 +1,5 @@
-#![allow(dead_code)]
-
-use ndarray::{s, Array, Axis, Ix2, Ix3, Slice, ArrayView};
-
-use super::util::{bilinear_upsample, gaussian_blur, downsample};
+use ndarray::{s, Array, Ix2, Ix3};
+use super::util::{bilinear_upsample, downsample, gaussian_blur};
 
 pub struct ScaleSpace {
     /// Total of number of octaves.
@@ -30,41 +27,43 @@ pub struct ScaleSpace {
     pub spaces: Vec<Array<f32, Ix3>>,
 }
 
-impl ScaleSpace {
-    fn default(image: Array<f32, Ix2>) -> Self {
-        let mut gss = ScaleSpace {
-            num_octaves: 5,
-            num_scales_per_octave: 6,
-            delta_seed: 0.5,
-            sigma_seed: 0.8,
-            sigma_input: 0.5,
-            spaces: Vec::with_capacity(5),
-        };
+#[allow(dead_code)]
+fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
+    let mut gss = ScaleSpace {
+        num_octaves: 5,
+        num_scales_per_octave: 6,
+        delta_seed: 0.5,
+        sigma_seed: 0.8,
+        sigma_input: 0.5,
+        spaces: Vec::with_capacity(5),
+    };
 
-        let mut sigma = gss.compute_initial_rho();
-        let seed: Array<f32, Ix2> = bilinear_upsample(image.view());
-        let mut seed: Array<f32, Ix2> = gaussian_blur(seed.view(), sigma);
-        let per_octave = gss.num_scales_per_octave;
+    let mut sigma = gss.compute_initial_rho();
+    let seed: Array<f32, Ix2> = bilinear_upsample(image.view());
+    let mut seed: Array<f32, Ix2> = gaussian_blur(seed.view(), sigma);
+    let per_octave = gss.num_scales_per_octave;
 
-        for _ in 0..gss.num_octaves {
-            let dim = [per_octave as usize, seed.dim().0, seed.dim().1];
-            let mut ss: Array<f32, Ix3> = Array::zeros(dim);
-            let mut next_image: Array<f32, Ix2>; 
-            ss.slice_mut(s![0, .., ..]).assign(&seed);
+    for _ in 0..gss.num_octaves {
+        let dim = [per_octave as usize, seed.dim().0, seed.dim().1];
+        let mut ss: Array<f32, Ix3> = Array::zeros(dim);
+        let mut next_image: Array<f32, Ix2>;
+        ss.slice_mut(s![0, .., ..]).assign(&seed);
 
-            for idx in 1..per_octave {
-                sigma = gss.compute_rho((idx - 1) as usize); 
-                next_image = gaussian_blur(ss.slice(s![(idx - 1) as usize, .., ..]), sigma); 
-                ss.slice_mut(s![idx as usize, .., ..]).assign(&next_image);
-            }
-
-            seed = downsample(ss.slice(s![(per_octave - 2) as usize, .., ..])); 
-            gss.spaces.push(ss); 
+        for idx in 1..per_octave {
+            sigma = gss.compute_rho((idx - 1) as usize);
+            next_image = gaussian_blur(ss.slice(s![(idx - 1) as usize, .., ..]), sigma);
+            ss.slice_mut(s![idx as usize, .., ..]).assign(&next_image);
         }
 
-        gss
+        seed = downsample(ss.slice(s![(per_octave - 2) as usize, .., ..]));
+        gss.spaces.push(ss);
     }
 
+    gss
+}
+
+#[allow(dead_code)]
+impl ScaleSpace {
     fn dsyx(&self, index: impl Into<[usize; 4]>) -> [f32; 4] {
         let [o, i, j, k]: [usize; 4] = index.into();
 
