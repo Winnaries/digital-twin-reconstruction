@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use ndarray::{s, Array, ArrayBase, ArrayView, Ix2, NdProducer};
+use ndarray::{s, Array, ArrayBase, ArrayView, Ix2};
 
 /// Resample image using bilinear interpolation.
 /// Result in an image of size double of the original.
@@ -84,6 +84,11 @@ pub fn mirrored_pad(image: ArrayView<f32, Ix2>, radius: usize) -> Array<f32, Ix2
     })
 }
 
+pub fn downsample(image: ArrayView<f32, Ix2>) -> Array<f32, Ix2> {
+    let dim = image.raw_dim(); 
+    Array::from_shape_fn(((dim[0] + 1) / 2, (dim[1] + 1) / 2), |(y, x)| { image[[y * 2, x * 2]] })
+}
+
 #[cfg(test)]
 mod test {
     use num::Signed;
@@ -149,4 +154,15 @@ mod test {
         assert!(all_close(output, expected, 0.001))
     }
 
+    #[test]
+    fn test_downsample() {
+        let input: Array<_, Ix2> = Array::range(0.0, 16.0, 1.0).into_shape([4, 4]).unwrap(); 
+        let output = downsample(input.view()); 
+        let expected = Array::from_shape_vec([2, 2], vec![
+            0.0, 2.0, 
+            8.0, 10.0, 
+        ]).unwrap(); 
+
+        assert!(all_close(output, expected, 0.001)); 
+    }
 }
