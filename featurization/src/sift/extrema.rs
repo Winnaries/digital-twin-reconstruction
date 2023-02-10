@@ -22,8 +22,6 @@ pub fn compute_extrema(dog: DoGSpace) -> (DoGSpace, Vec<Array<usize, Ix2>>) {
                     if window[[1, 1, 1]] == maximum {
                         local.extend([i, j, k].iter()); 
                     }
-                    
-                    println!("{:?}", (maximum, window[[1, 1, 1]], window));
                 }
             }
         }

@@ -54,10 +54,6 @@ pub fn gaussian_blur(image: ArrayView<f32, Ix2>, sigma: f32) -> Array<f32, Ix2> 
 
     let blurred = Array::from_shape_fn(image.raw_dim(), |(y, x)| {
         let slice: ArrayView<f32, Ix2> = padded.slice(s![y..y + width, x..x + width]);
-        if x == 0 && y == 0 {
-            println!("{:?}", slice); 
-            println!("{:?}", kernel); 
-        }
         (&slice * &kernel).sum()
     }); 
 
