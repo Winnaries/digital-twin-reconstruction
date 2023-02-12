@@ -1,8 +1,14 @@
+#![allow(dead_code)]
+
 use na::{Matrix3, Vector3};
 use nalgebra as na;
-use ndarray::{s, stack, Array, Array3, ArrayView, Axis, Ix3, Ix4, Ix5, Slice};
+use ndarray::{
+    s, stack, Array, Array1, Array3, Array4, Array5, ArrayView, Axis, Ix1, Ix2, Ix3, Ix4, Ix5,
+    Slice,
+};
 
-#[allow(dead_code)]
+use super::difference::DoGSpace;
+
 pub fn compute_gradient(space: ArrayView<f32, Ix3>) -> Array<f32, Ix4> {
     let right = Slice::from((2 as isize)..);
     let left = Slice::from(..(-2 as isize));
@@ -41,7 +47,6 @@ pub fn compute_gradient(space: ArrayView<f32, Ix3>) -> Array<f32, Ix4> {
     grad
 }
 
-#[allow(dead_code)]
 pub fn compute_hessian(space: ArrayView<f32, Ix3>) -> Array<f32, Ix5> {
     let left = Slice::from(..(-2 as isize));
     let center = Slice::from((1 as isize)..(-1 as isize));
@@ -95,13 +100,26 @@ pub fn compute_hessian(space: ArrayView<f32, Ix3>) -> Array<f32, Ix5> {
     padded
 }
 
-#[allow(dead_code)]
 pub fn quadratic_interpolate(
+    space: ArrayView<f32, Ix3>,
+    gradient: ArrayView<f32, Ix4>,
+    alpha: ArrayView<f32, Ix1>,
+    syx: [usize; 3],
+) -> f32 {
+    let [s, y, x] = syx;
+    let space = space.slice(s![s, y, x].to_owned());
+    let gradient = gradient.slice(s![s, y, x, ..]).to_owned();
+    let omega = &space + 0.5 * gradient.dot(&alpha);
+    omega.into_scalar()
+}
+
+pub fn max_quadratic_interpolate(
     gradient: ArrayView<f32, Ix4>,
     hessian: ArrayView<f32, Ix5>,
     syx: [usize; 3],
-) -> Option<[f32; 3]> {
+) -> Array<f32, Ix1> {
     let [s, y, x] = syx;
+
     let gradient = gradient.slice(s![s, y, x, ..]).to_owned();
     let hessian = hessian.slice(s![s, y, x, .., ..]).to_owned();
 
@@ -110,18 +128,112 @@ pub fn quadratic_interpolate(
 
     let alpha = -hessian.try_inverse().unwrap() * gradient;
 
-    if alpha.iter().all(|x| x.abs() < 0.6) {
-        Some([alpha[(0, 0)], alpha[(1, 0)], alpha[(2, 0)]])
-    } else {
-        None
-    }
+    while !alpha.iter().all(|x| x.abs() < 0.6) {}
+
+    Array::from_vec(vec![alpha[(0, 0)], alpha[(1, 0)], alpha[(2, 0)]])
 }
+
+pub fn compute_edgeness(hessian: ArrayView<f32, Ix5>, syx: [usize; 3]) -> f32 {
+    let [s, y, x] = syx;
+    let hessian = hessian.slice(s![s, y, x, 1 as isize.., 1 as isize..]);
+    (hessian[[0, 0]] + hessian[[1, 1]]).powi(2)
+        / (hessian[[0, 0]] * hessian[[1, 1]] - hessian[[0, 1]] * hessian[[1, 0]])
+}
+
+pub fn refine_keypoints_with_low_contrast(
+    dog: DoGSpace,
+    points: Array<usize, Ix2>,
+) -> Array<bool, Ix1> {
+    let mut mask: Array<_, Ix1> = Array::from_elem(points.shape()[0], true);
+
+    let gradient: Vec<Array4<_>> = dog
+        .spaces
+        .iter()
+        .map(|s: &Array3<_>| compute_gradient(s.view()))
+        .collect();
+
+    let hessian: Vec<Array5<_>> = dog
+        .spaces
+        .iter()
+        .map(|s: &Array3<_>| compute_hessian(s.view()))
+        .collect();
+
+    mask.iter_mut()
+        .zip(points.outer_iter())
+        .for_each(|(m, point)| {
+            let (o, mut s, mut y, mut x) = (point[0], point[1], point[2], point[3]);
+            let mut attempt = 0;
+
+            let alpha = loop {
+                if attempt > 5 {
+                    break None;
+                } else {
+                    attempt += 1
+                }
+
+                let a: Array1<f32> =
+                    max_quadratic_interpolate(gradient[o].view(), hessian[o].view(), [s, y, x]);
+
+                if a.iter().all(|x| x.abs() < 0.6) {
+                    break Some(a);
+                } else {
+                    s = (s as f32 + a[[0]]).round() as usize;
+                    y = (y as f32 + a[[1]]).round() as usize;
+                    x = (x as f32 + a[[2]]).round() as usize;
+                }
+            };
+
+            if let Some(alpha) = alpha {
+                let value = quadratic_interpolate(
+                    dog.spaces[o].view(),
+                    gradient[o].view(),
+                    alpha.view(),
+                    [s, y, x],
+                );
+
+                if value < 0.015 {
+                    *m = false;
+                }
+            }
+        });
+
+    mask
+}
+
+pub fn refine_keypoints_on_edge(
+    dog: DoGSpace,
+    points: Array<usize, Ix2>,
+) -> Array<bool, Ix1> {
+    let mut mask: Array<_, Ix1> = Array::from_elem(points.shape()[0], true);
+
+    let hessian: Vec<Array5<_>> = dog
+        .spaces
+        .iter()
+        .map(|s: &Array3<_>| compute_hessian(s.view()))
+        .collect();
+
+    mask.iter_mut()
+        .zip(points.outer_iter())
+        .for_each(|(m, point)| {
+            let (o, s, y, x) = (point[0], point[1], point[2], point[3]);
+            let edgeness = compute_edgeness(hessian[o].view(), [s, y, x]); 
+            let c_edge = 10.0f32; 
+            let check = (c_edge + 1.0).powi(2) / c_edge; 
+            
+            if edgeness > check {
+                *m = false; 
+            }
+        }); 
+
+    mask
+}
+
 
 #[cfg(test)]
 mod test {
     use std::fmt::Debug;
 
-    use super::{compute_gradient, compute_hessian, quadratic_interpolate};
+    use super::*;
     use ndarray::{s, Array};
     use num::Signed;
 
@@ -203,7 +315,7 @@ mod test {
     }
 
     #[test]
-    fn test_quadratic_interplocation() {
+    fn test_max_quadratic_interpolation() {
         let mut input = Array::zeros([3, 3, 3]);
         input.fill(1.0);
         input[[1, 1, 1]] = 2.0;
@@ -213,10 +325,25 @@ mod test {
         let hessian = compute_hessian(input.view());
         let syx = [1, 1, 1];
 
-        let output = quadratic_interpolate(gradient.view(), hessian.view(), syx);
-        assert!(output.is_some());
-
-        let output = output.unwrap();
+        let output = max_quadratic_interpolate(gradient.view(), hessian.view(), syx);
         assert!(all_close([0.1666, 0.0, 0.0], output, 0.0001));
+    }
+
+    #[test]
+    fn test_quadratic_interpolation() {
+        let mut input = Array::zeros([3, 3, 3]);
+
+        input.fill(1.0);
+        input[[1, 1, 1]] = 2.0;
+        input[[2, 1, 1]] = 1.5;
+
+        let gradient = compute_gradient(input.view());
+        let hessian = compute_hessian(input.view());
+        let syx = [1, 1, 1];
+
+        let alpha = max_quadratic_interpolate(gradient.view(), hessian.view(), syx);
+        let output = quadratic_interpolate(input.view(), gradient.view(), alpha.view(), syx);
+
+        assert!((output - 2.0208).abs() < 0.0001);
     }
 }
