@@ -1,17 +1,22 @@
 use image::io::Reader as ImageReader;
 use ndarray::Array2;
-use sift::util::gaussian_blur; 
+use proc::{embed, to_ndarray};
 use std::env;
-use proc::{embed, discretize, to_ndarray, to_image}; 
+use sift::{
+    difference::compute_difference_of_gaussian,
+    extrema::compute_extrema,
+    refiner::{refine_keypoints_on_edge, refine_keypoints_with_low_contrast},
+    scale::compute_scale_space,
+};
 
-mod sift; 
-mod proc; 
+mod proc;
+mod sift;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 3 {
-        println!("Usage: featurize <input> <output>");
+    if args.len() != 2 {
+        println!("Usage: featurize <input>");
         return;
     }
 
@@ -22,9 +27,21 @@ fn main() {
         .grayscale()
         .as_luma8()
         .unwrap()
-        .clone(); 
+        .clone();
 
     let matrix: Array2<f32> = to_ndarray(embed(&img));
-    let blurred: Array2<f32> = gaussian_blur(matrix.view(), 3.0f32);
-    discretize(&to_image(blurred.view())).save(&args[2]).unwrap(); 
+    let scales = compute_scale_space(matrix);
+    let differences = compute_difference_of_gaussian(&scales);
+
+    let keypoints = compute_extrema(&differences);
+    println!("⭐\tOriginally extracted keypoints: {}", keypoints.len());
+
+    let keypoints = refine_keypoints_with_low_contrast(&scales, &differences, keypoints);
+    println!(
+        "\t⌞ After discarded low-contrast keypoints: {}",
+        keypoints.len()
+    );
+
+    let keypoints = refine_keypoints_on_edge(&differences, keypoints);
+    println!("\t⌞ After discarded keypoints on edge: {}", keypoints.len());
 }

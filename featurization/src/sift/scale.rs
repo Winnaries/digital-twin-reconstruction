@@ -21,29 +21,34 @@ pub struct ScaleSpace {
     /// image or matrix.
     pub sigma_input: f32,
 
-    /// An 4-dimensional array
+    /// A vector of 3-dimensional array
     /// with each axis representing
-    /// octave, sigma, y, x.
+    /// octave, sigma, y, x. Cannot stack 
+    /// inner arrays because of different size. 
     pub spaces: Vec<Array<f32, Ix3>>,
 }
 
 #[allow(dead_code)]
-fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
+pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
     let mut gss = ScaleSpace {
         num_octaves: 5,
-        num_scales_per_octave: 6,
+        num_scales_per_octave: 3,
         delta_seed: 0.5,
         sigma_seed: 0.8,
         sigma_input: 0.5,
         spaces: Vec::with_capacity(5),
     };
 
+    println!(); 
+    println!("🪴\tGenerating seed image...");
     let mut sigma = gss.compute_initial_rho();
     let seed: Array<f32, Ix2> = bilinear_upsample(image.view());
     let mut seed: Array<f32, Ix2> = gaussian_blur(seed.view(), sigma);
-    let per_octave = gss.num_scales_per_octave;
+    let per_octave = gss.num_scales_per_octave + 3;
 
-    for _ in 0..gss.num_octaves {
+    for o in 0..gss.num_octaves {
+        println!("\t⌞ Generating octave #{}...", o);
+        
         let dim = [per_octave as usize, seed.dim().0, seed.dim().1];
         let mut ss: Array<f32, Ix3> = Array::zeros(dim);
         let mut next_image: Array<f32, Ix2>;
@@ -64,18 +69,19 @@ fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
 
 #[allow(dead_code)]
 impl ScaleSpace {
-    fn dsyx(&self, index: impl Into<[usize; 4]>) -> [f32; 4] {
-        let [o, i, j, k]: [usize; 4] = index.into();
+    pub fn dsyx(&self, o: usize, s: f32, m: f32, n: f32) -> [f32; 4] {
+        let delta = self.compute_octave_delta_seed(o); 
+        let sigma = delta / self.delta_seed * self.sigma_seed * 2.0f32.powf(s / self.num_scales_per_octave as f32);
 
         [
-            self.compute_octave_delta_seed(o),
-            self.compute_specific_sigma(o, i),
-            j as f32,
-            k as f32,
+            delta, 
+            sigma, 
+            m as f32 * delta,
+            n as f32 * delta,
         ]
     }
 
-    fn ds(&self, index: impl Into<[usize; 2]>) -> [f32; 2] {
+    pub fn ds(&self, index: impl Into<[usize; 2]>) -> [f32; 2] {
         let [o, i]: [usize; 2] = index.into();
 
         [
@@ -93,7 +99,7 @@ impl ScaleSpace {
     }
 
     fn compute_specific_sigma(&self, octave: usize, index: usize) -> f32 {
-        let denom = self.num_scales_per_octave as f32 - 3f32;
+        let denom = self.num_scales_per_octave as f32;
         let octave_sigma_seed = self.compute_octave_sigma_seed(octave);
         let k = 2.0f32.powf(denom.recip());
         k.powi(index as i32) * octave_sigma_seed
@@ -139,7 +145,7 @@ mod test {
     pub fn test_index_to_parameters_conversion() {
         let space = ScaleSpace {
             num_octaves: 5,
-            num_scales_per_octave: 6,
+            num_scales_per_octave: 3,
             delta_seed: 0.5,
             sigma_seed: 0.8,
             sigma_input: 0.5,

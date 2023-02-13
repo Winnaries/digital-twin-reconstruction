@@ -11,4 +11,8 @@ num = "0.4.0"
 image = "0.24.0"
 imageproc = "0.23.0"
 nalgebra = { version = "0.32" }
-ndarray = { version = "0.15.6", features = ["rayon"] }
+ndarray = { version = "0.15.6" }
+rayon = { version = "1.6.1", optional = true }
+
+[features]
+parallel = ["dep:rayon", "ndarray/rayon"]

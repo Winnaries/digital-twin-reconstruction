@@ -8,13 +8,13 @@ pub struct DoGSpace {
 }
 
 #[allow(dead_code)]
-pub fn compute_difference_of_gaussian(gss: ScaleSpace) -> DoGSpace {
+pub fn compute_difference_of_gaussian(gss: &ScaleSpace) -> DoGSpace {
     let num_octaves = gss.num_octaves as usize; 
-    let num_dog_per_octaves = gss.num_scales_per_octave as usize - 1; 
+    let num_dog_per_octaves = gss.num_scales_per_octave as usize; 
     let mut spaces: Vec<Array<f32, Ix3>> = Vec::with_capacity(num_octaves); 
 
     for octave in 0..num_octaves {
-        let prev = gss.spaces[octave].slice(s![..-2, .., ..]); 
+        let prev = gss.spaces[octave].slice(s![..-1, .., ..]); 
         let next = gss.spaces[octave].slice(s![1.., .., ..]); 
         spaces.push(&next - &prev); 
     }

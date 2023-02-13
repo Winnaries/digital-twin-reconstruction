@@ -40,6 +40,7 @@ pub fn bilinear_upsample(image: ArrayView<f32, Ix2>) -> Array<f32, Ix2> {
     })
 }
 
+#[cfg(not(feature = "parallel"))]
 pub fn gaussian_blur(image: ArrayView<f32, Ix2>, sigma: f32) -> Array<f32, Ix2> {
     let n = (4.0 * sigma).ceil() as usize;
     let width = 2 * n + 1;
@@ -58,6 +59,36 @@ pub fn gaussian_blur(image: ArrayView<f32, Ix2>, sigma: f32) -> Array<f32, Ix2> 
     }); 
 
     let maximum = blurred.iter().map(|&x| { x }).reduce(f32::max).unwrap(); 
+    blurred / maximum
+}
+
+#[cfg(feature = "parallel")]
+pub fn gaussian_blur(image: ArrayView<f32, Ix2>, sigma: f32) -> Array<f32, Ix2> {
+    use ndarray::par_azip;
+    use rayon::prelude::{ParallelIterator, IntoParallelRefIterator};
+
+    let n = (4.0 * sigma).ceil() as usize;
+    let width = 2 * n + 1;
+    let padded: Array<f32, Ix2> = mirrored_pad(image.view(), n); 
+    let mut blurred: Array<f32, Ix2> = Array::zeros(image.raw_dim()); 
+    let mut kernel: Array<f32, Ix2> = Array::zeros([width, width]);
+
+    par_azip!((index (y, x), value in &mut kernel) {
+        let x = x as i32 - n as i32; 
+        let y = y as i32 - n as i32; 
+        let distance = ((x * x + y * y) as f32).sqrt();
+        let prefactor = -(2.0 * sigma * sigma).recip();
+        *value = (distance * prefactor).exp()
+    }); 
+
+    par_azip!((index (y, x), value in &mut blurred) {
+        *value = (&padded.slice(s![y..y + width, x..x + width]) * &kernel).sum(); 
+    });
+
+    let maximum = blurred.par_iter()
+        .map(|&x| x)
+        .reduce(|| f32::MIN, f32::max); 
+
     blurred / maximum
 }
 

@@ -1,42 +1,45 @@
-use crate::sift::difference::DoGSpace;
-use ndarray::{s, Array, Ix2};
+use crate::{sift::difference::DoGSpace, discrete_keypoint};
+use ndarray::s;
+
+use super::keypoint::DiscreteKeypoint;
 
 #[allow(dead_code)]
-pub fn compute_extrema(dog: DoGSpace) -> (DoGSpace, Array<usize, Ix2>) {
-    let mut extremas = Vec::<usize>::new();
+pub fn compute_extrema(dog: &DoGSpace) -> Vec<DiscreteKeypoint> {
+    let mut extremas = Vec::<DiscreteKeypoint>::new();
 
     for (o, space) in dog.spaces.iter().enumerate() {
         let dim = space.raw_dim();
 
-        for i in 1..(dim[0] - 1) {
-            for j in 1..(dim[1] - 1) {
-                for k in 1..(dim[2] - 1) {
-                    let window = space.slice(s![i - 1..=i + 1, j - 1..=j + 1, k - 1..=k + 1]);
+        for s in 1..(dim[0] - 1) {
+            for m in 1..(dim[1] - 1) {
+                for n in 1..(dim[2] - 1) {
+                    let window = space.slice(s![s - 1..=s + 1, m - 1..=m + 1, n - 1..=n + 1]);
                     let maximum = window.into_iter().map(|&x| x).reduce(f32::max).unwrap();
                     let minimum = window.into_iter().map(|&x| x).reduce(f32::min).unwrap(); 
                     if window[[1, 1, 1]] == maximum || window[[1, 1, 1]] == minimum {
-                        extremas.extend([o, i, j, k].iter());
+                        extremas.push(discrete_keypoint!(o, s, m, n));
                     }
                 }
             }
         }
     }
 
-    (dog, Array::from_shape_vec([extremas.len() / 4, 4], extremas).unwrap())
+    extremas
 }
 
 #[cfg(test)]
 mod test {
+    use crate::discrete_keypoint;
+
     use super::*;
-    use ndarray::{Axis, Ix3};
-    use num::Integer;
+    use ndarray::{Axis, Ix3, Array};
     use std::fmt::Debug;
 
     fn all_eq<T, K, I>(a: T, b: K) -> bool
     where
         T: Clone + IntoIterator<Item = I> + Debug,
         K: Clone + IntoIterator<Item = I> + Debug,
-        I: Integer,
+        I: Eq,
     {
         let ai = a.clone().into_iter();
         let bi = b.clone().into_iter();
@@ -54,7 +57,7 @@ mod test {
     fn test_extremas_detection() {
         let mut input = DoGSpace {
             num_octaves: 1,
-            num_dog_per_octaves: 3,
+            num_dog_per_octaves: 1,
             spaces: vec![],
         };
 
@@ -101,13 +104,16 @@ mod test {
 
         input.spaces.push(space);
 
-        let (_, keypoints) = compute_extrema(input);
-        println!("{:?}", keypoints);
+        let keypoints = compute_extrema(&input);
 
-        assert_eq!(keypoints.raw_dim()[0], 3);
+        assert_eq!(keypoints.len(), 3);
         assert!(all_eq(
             keypoints,
-            [0, 1, 1, 1, 0, 1, 2, 1, 0, 1, 2, 2]
+            [
+                discrete_keypoint!(0, 1, 1, 1),
+                discrete_keypoint!(0, 1, 2, 1),
+                discrete_keypoint!(0, 1, 2, 2)
+            ]
         ));
     }
 }

@@ -3,11 +3,16 @@
 use na::{Matrix3, Vector3};
 use nalgebra as na;
 use ndarray::{
-    s, stack, Array, Array1, Array3, Array4, Array5, ArrayView, Axis, Ix1, Ix2, Ix3, Ix4, Ix5,
+    s, stack, Array, Array1, Array3, Array4, Array5, ArrayView, Axis, Ix1, Ix3, Ix4, Ix5,
     Slice,
 };
 
-use super::difference::DoGSpace;
+use crate::absolute_keypoint;
+
+use super::{
+    difference::DoGSpace,
+    keypoint::{AbsoluteKeypoint, DiscreteKeypoint}, scale::ScaleSpace,
+};
 
 pub fn compute_gradient(space: ArrayView<f32, Ix3>) -> Array<f32, Ix4> {
     let right = Slice::from((2 as isize)..);
@@ -141,11 +146,10 @@ pub fn compute_edgeness(hessian: ArrayView<f32, Ix5>, syx: [usize; 3]) -> f32 {
 }
 
 pub fn refine_keypoints_with_low_contrast(
-    dog: DoGSpace,
-    points: Array<usize, Ix2>,
-) -> Array<bool, Ix1> {
-    let mut mask: Array<_, Ix1> = Array::from_elem(points.shape()[0], true);
-
+    scale: &ScaleSpace, 
+    dog: &DoGSpace,
+    points: Vec<DiscreteKeypoint>,
+) -> Vec<AbsoluteKeypoint> {
     let gradient: Vec<Array4<_>> = dog
         .spaces
         .iter()
@@ -158,76 +162,91 @@ pub fn refine_keypoints_with_low_contrast(
         .map(|s: &Array3<_>| compute_hessian(s.view()))
         .collect();
 
-    mask.iter_mut()
-        .zip(points.outer_iter())
-        .for_each(|(m, point)| {
-            let (o, mut s, mut y, mut x) = (point[0], point[1], point[2], point[3]);
-            let mut attempt = 0;
+    let compute_alpha = |point: DiscreteKeypoint| {
+        let mut attempt = 0;
+        let DiscreteKeypoint {
+            o,
+            mut s,
+            mut m,
+            mut n,
+        } = point;
 
-            let alpha = loop {
-                if attempt > 5 {
-                    break None;
-                } else {
-                    attempt += 1
-                }
-
-                let a: Array1<f32> =
-                    max_quadratic_interpolate(gradient[o].view(), hessian[o].view(), [s, y, x]);
-
-                if a.iter().all(|x| x.abs() < 0.6) {
-                    break Some(a);
-                } else {
-                    s = (s as f32 + a[[0]]).round() as usize;
-                    y = (y as f32 + a[[1]]).round() as usize;
-                    x = (x as f32 + a[[2]]).round() as usize;
-                }
-            };
-
-            if let Some(alpha) = alpha {
-                let value = quadratic_interpolate(
-                    dog.spaces[o].view(),
-                    gradient[o].view(),
-                    alpha.view(),
-                    [s, y, x],
-                );
-
-                if value < 0.015 {
-                    *m = false;
-                }
+        loop {
+            if attempt > 5 {
+                break None;
+            } else {
+                attempt += 1
             }
-        });
 
-    mask
+            #[rustfmt::skip]
+            let a: Array1<f32> = max_quadratic_interpolate(
+                gradient[o].view(), 
+                hessian[o].view(), 
+                [s, m, n]
+            );
+
+            if a.iter().all(|x| x.abs() < 0.6) {
+                break Some((o, s, m, n, a));
+            } else {
+                s = (s as f32 + a[[0]]).round() as usize;
+                m = (m as f32 + a[[1]]).round() as usize;
+                n = (n as f32 + a[[2]]).round() as usize;
+            }
+        }
+    }; 
+
+    let compute_absolute_point = |(o, s, m, n, alpha): (usize, usize, usize, usize, Array1<f32>)| {
+        let omega = quadratic_interpolate(
+            dog.spaces[o].view(), 
+            gradient[o].view(),
+            alpha.view(),
+            [s, m, n],
+        );
+
+        let [_, sigma, y, x] = scale.dsyx(
+            o, 
+            s as f32 + alpha[[0]], 
+            m as f32 + alpha[[1]], 
+            n as f32 + alpha[[2]]
+        ); 
+
+        if omega > 0.015 {
+            Some(absolute_keypoint!(o, s, m, n, y, x, sigma, omega))
+        } else {
+            None
+        }
+    }; 
+
+    points
+        .into_iter()
+        .filter_map(compute_alpha)
+        .filter_map(compute_absolute_point)
+        .collect()
 }
 
-pub fn refine_keypoints_on_edge(
-    dog: DoGSpace,
-    points: Array<usize, Ix2>,
-) -> Array<bool, Ix1> {
-    let mut mask: Array<_, Ix1> = Array::from_elem(points.shape()[0], true);
-
+pub fn refine_keypoints_on_edge(dog: &DoGSpace, points: Vec<AbsoluteKeypoint>) -> Vec<AbsoluteKeypoint> {
     let hessian: Vec<Array5<_>> = dog
         .spaces
         .iter()
         .map(|s: &Array3<_>| compute_hessian(s.view()))
         .collect();
 
-    mask.iter_mut()
-        .zip(points.outer_iter())
-        .for_each(|(m, point)| {
-            let (o, s, y, x) = (point[0], point[1], point[2], point[3]);
-            let edgeness = compute_edgeness(hessian[o].view(), [s, y, x]); 
+    points.into_iter()
+        .filter_map(|p| {
+            let DiscreteKeypoint {
+                o, 
+                s, 
+                m, 
+                n, 
+            } = p.inner; 
+
+            let edgeness = compute_edgeness(hessian[o].view(), [s, m, n]); 
             let c_edge = 10.0f32; 
             let check = (c_edge + 1.0).powi(2) / c_edge; 
-            
-            if edgeness > check {
-                *m = false; 
-            }
-        }); 
 
-    mask
+            if edgeness > check { None } else { Some(p) }
+        }).collect()
 }
-
 
 #[cfg(test)]
 mod test {

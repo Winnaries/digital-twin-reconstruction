@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use image::{ImageBuffer, Luma, Pixel, GrayImage};
 use ndarray::{Array, Array2, ArrayView2};
 
