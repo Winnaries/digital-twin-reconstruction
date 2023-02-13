@@ -1,5 +1,6 @@
 use image::io::Reader as ImageReader;
-use ndarray::Array2;
+use ndarray::{Array2, Array};
+use ndarray_npy::write_npy;
 use proc::{embed, to_ndarray};
 use std::env;
 use sift::{
@@ -7,6 +8,7 @@ use sift::{
     extrema::compute_extrema,
     refiner::{refine_keypoints_on_edge, refine_keypoints_with_low_contrast},
     scale::compute_scale_space,
+    keypoint::AbsoluteKeypoint, 
 };
 
 mod proc;
@@ -15,8 +17,8 @@ mod sift;
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() != 2 {
-        println!("Usage: featurize <input>");
+    if args.len() != 3 {
+        println!("Usage: featurize <input> <npz_output>");
         return;
     }
 
@@ -44,4 +46,19 @@ fn main() {
 
     let keypoints = refine_keypoints_on_edge(&differences, keypoints);
     println!("｜\t⌞ After discarded keypoints on edge: {}", keypoints.len());
+
+    let keypoints: Vec<f32> = keypoints.into_iter().flat_map(|p| {
+        let AbsoluteKeypoint {
+            x, 
+            y, 
+            sigma, 
+            ..
+        } = p; 
+        
+        [x, y, sigma]
+    }).collect();
+    
+    let keypoints = Array::from_shape_vec([keypoints.len() / 3, 3], keypoints).unwrap();
+
+    write_npy(&args[2], &keypoints).unwrap();
 }
