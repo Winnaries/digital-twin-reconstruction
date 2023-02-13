@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use na::{Matrix3, Vector3};
 use nalgebra as na;
 use ndarray::{

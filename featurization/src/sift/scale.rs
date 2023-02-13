@@ -1,5 +1,5 @@
-use ndarray::{s, Array, Ix2, Ix3};
 use super::util::{bilinear_upsample, downsample, gaussian_blur};
+use ndarray::{s, Array, ArrayView, Axis, Ix2, Ix3};
 
 pub struct ScaleSpace {
     /// Total of number of octaves.
@@ -23,12 +23,11 @@ pub struct ScaleSpace {
 
     /// A vector of 3-dimensional array
     /// with each axis representing
-    /// octave, sigma, y, x. Cannot stack 
-    /// inner arrays because of different size. 
+    /// octave, sigma, y, x. Cannot stack
+    /// inner arrays because of different size.
     pub spaces: Vec<Array<f32, Ix3>>,
 }
 
-#[allow(dead_code)]
 pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
     let mut gss = ScaleSpace {
         num_octaves: 5,
@@ -39,7 +38,7 @@ pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
         spaces: Vec::with_capacity(5),
     };
 
-    println!(); 
+    println!();
     println!("🪴\tGenerating seed image...");
     let mut sigma = gss.compute_initial_rho();
     let seed: Array<f32, Ix2> = bilinear_upsample(image.view());
@@ -48,7 +47,7 @@ pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
 
     for o in 0..gss.num_octaves {
         println!("｜\t⌞ Generating octave #{}...", o);
-        
+
         let dim = [per_octave as usize, seed.dim().0, seed.dim().1];
         let mut ss: Array<f32, Ix3> = Array::zeros(dim);
         let mut next_image: Array<f32, Ix2>;
@@ -69,16 +68,26 @@ pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
 
 #[allow(dead_code)]
 impl ScaleSpace {
-    pub fn dsyx(&self, o: usize, s: f32, m: f32, n: f32) -> [f32; 4] {
-        let delta = self.compute_octave_delta_seed(o); 
-        let sigma = delta / self.delta_seed * self.sigma_seed * 2.0f32.powf(s / self.num_scales_per_octave as f32);
+    pub fn nearest_sigma_space(&self, sigma: f32) -> (f32, ArrayView<f32, Ix2>) {
+        let k = 2.0f32.powf((self.num_scales_per_octave as f32).recip());
+        let a = sigma.log10() / k.log10();
+        let b = self.sigma_seed.log10() / k.log10();
+        let i = (a - b).round().max(1.0) as usize - 1;
+        let o = i / 3;
 
-        [
-            delta, 
-            sigma, 
-            m as f32 * delta,
-            n as f32 * delta,
-        ]
+        (
+            self.compute_octave_delta_seed(o),
+            self.spaces[o].index_axis(Axis(0), i % 3 + 1),
+        )
+    }
+
+    pub fn dsyx(&self, o: usize, s: f32, m: f32, n: f32) -> [f32; 4] {
+        let delta = self.compute_octave_delta_seed(o);
+        let sigma = delta / self.delta_seed
+            * self.sigma_seed
+            * 2.0f32.powf(s / self.num_scales_per_octave as f32);
+
+        [delta, sigma, m as f32 * delta, n as f32 * delta]
     }
 
     pub fn ds(&self, index: impl Into<[usize; 2]>) -> [f32; 2] {
@@ -156,5 +165,47 @@ mod test {
         assert!(all_close(space.ds([0, 5]), [0.5, 2.54], 0.1));
         assert!(all_close(space.ds([2, 3]), [2.0, 6.40], 0.1));
         assert!(all_close(space.ds([4, 2]), [8.0, 20.32], 0.1));
+    }
+
+    #[test]
+    pub fn test_retrieving_nearest_sigma_space() {
+        let spaces: Vec<Array<f32, Ix3>> = (0..5)
+            .into_iter()
+            .map(|_| Array::from_shape_vec([6, 1, 1], vec![0.0, 1.0, 2.0, 3.0, 4.0, 5.0]).unwrap())
+            .collect();
+
+        let scales = ScaleSpace {
+            num_octaves: 5,
+            num_scales_per_octave: 3,
+            delta_seed: 0.5,
+            sigma_seed: 0.8,
+            sigma_input: 0.5,
+            spaces,
+        };
+
+        let (delta, space) = scales.nearest_sigma_space(1.0);
+
+        assert_eq!(delta, 0.5);
+        assert_eq!(space[[0, 0]], 1.0);
+
+        let (delta, space) = scales.nearest_sigma_space(1.3);
+
+        assert_eq!(delta, 0.5);
+        assert_eq!(space[[0, 0]], 2.0);
+
+        let (delta, space) = scales.nearest_sigma_space(7.0);
+
+        assert_eq!(delta, 2.0);
+        assert_eq!(space[[0, 0]], 3.0);
+
+        let (delta, space) = scales.nearest_sigma_space(2.6);
+
+        assert_eq!(delta, 1.0);
+        assert_eq!(space[[0, 0]], 2.0);
+        
+         let (delta, space) = scales.nearest_sigma_space(0.8);
+
+        assert_eq!(delta, 0.5);
+        assert_eq!(space[[0, 0]], 1.0);
     }
 }

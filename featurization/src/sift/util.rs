@@ -11,7 +11,7 @@ pub fn bilinear_upsample(image: ArrayView<f32, Ix2>) -> Array<f32, Ix2> {
         let (dw, dh) = (2 * owidth, 2 * oheight);
         let x = (x % dw).min((dw - 1 - x) % dw);
         let y = (y % dh).min((dh - 1 - y) % dh);
-        (x, y)
+        (y, x)
     };
 
     ArrayBase::from_shape_fn((nheight, nwidth), |(y, x)| {
