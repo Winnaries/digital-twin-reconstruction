@@ -7,6 +7,9 @@ use ndarray::{
     Slice,
 };
 
+#[cfg(feature = "parallel")]
+use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+
 use crate::absolute_keypoint;
 
 use super::{
@@ -133,8 +136,6 @@ pub fn max_quadratic_interpolate(
 
     let alpha = -hessian.try_inverse().unwrap() * gradient;
 
-    while !alpha.iter().all(|x| x.abs() < 0.6) {}
-
     Array::from_vec(vec![alpha[(0, 0)], alpha[(1, 0)], alpha[(2, 0)]])
 }
 
@@ -150,17 +151,24 @@ pub fn refine_keypoints_with_low_contrast(
     dog: &DoGSpace,
     points: Vec<DiscreteKeypoint>,
 ) -> Vec<AbsoluteKeypoint> {
+    println!("｜\t⌞ Computing gradient"); 
     let gradient: Vec<Array4<_>> = dog
         .spaces
         .iter()
         .map(|s: &Array3<_>| compute_gradient(s.view()))
         .collect();
-
+        
+    println!("｜\t⌞ Computing hessian"); 
     let hessian: Vec<Array5<_>> = dog
         .spaces
         .iter()
         .map(|s: &Array3<_>| compute_hessian(s.view()))
         .collect();
+
+    let dim: Vec<[usize; 3]> = gradient
+        .iter()
+        .map(|x| [x.dim().0, x.dim().1, x.dim().2])
+        .collect(); 
 
     let compute_alpha = |point: DiscreteKeypoint| {
         let mut attempt = 0;
@@ -188,9 +196,9 @@ pub fn refine_keypoints_with_low_contrast(
             if a.iter().all(|x| x.abs() < 0.6) {
                 break Some((o, s, m, n, a));
             } else {
-                s = (s as f32 + a[[0]]).round() as usize;
-                m = (m as f32 + a[[1]]).round() as usize;
-                n = (n as f32 + a[[2]]).round() as usize;
+                s = ((s as f32 + a[[0]]).round() as usize).clamp(1, dim[o][0] - 2);
+                m = ((m as f32 + a[[1]]).round() as usize).clamp(1, dim[o][1] - 2);
+                n = ((n as f32 + a[[2]]).round() as usize).clamp(1, dim[o][2] - 2);
             }
         }
     }; 
@@ -217,11 +225,20 @@ pub fn refine_keypoints_with_low_contrast(
         }
     }; 
 
-    points
+    #[cfg(not(feature = "parallel"))]
+    let result = points
         .into_iter()
         .filter_map(compute_alpha)
         .filter_map(compute_absolute_point)
-        .collect()
+        .collect(); 
+
+    #[cfg(feature = "parallel")]
+    let result = points.into_par_iter()
+        .filter_map(compute_alpha)
+        .filter_map(compute_absolute_point)
+        .collect(); 
+
+    result
 }
 
 pub fn refine_keypoints_on_edge(dog: &DoGSpace, points: Vec<AbsoluteKeypoint>) -> Vec<AbsoluteKeypoint> {
@@ -231,21 +248,28 @@ pub fn refine_keypoints_on_edge(dog: &DoGSpace, points: Vec<AbsoluteKeypoint>) -
         .map(|s: &Array3<_>| compute_hessian(s.view()))
         .collect();
 
-    points.into_iter()
-        .filter_map(|p| {
-            let DiscreteKeypoint {
-                o, 
-                s, 
-                m, 
-                n, 
-            } = p.inner; 
+    let filter = |p: AbsoluteKeypoint| {
+        let DiscreteKeypoint {
+            o, 
+            s, 
+            m, 
+            n, 
+        } = p.inner; 
 
-            let edgeness = compute_edgeness(hessian[o].view(), [s, m, n]); 
-            let c_edge = 10.0f32; 
-            let check = (c_edge + 1.0).powi(2) / c_edge; 
+        let edgeness = compute_edgeness(hessian[o].view(), [s, m, n]); 
+        let c_edge = 10.0f32; 
+        let check = (c_edge + 1.0).powi(2) / c_edge; 
 
-            if edgeness > check { None } else { Some(p) }
-        }).collect()
+        if edgeness > check { None } else { Some(p) }
+    }; 
+
+    #[cfg(not(feature = "parallel"))]
+    let result = points.into_iter().filter_map(filter).collect(); 
+    
+    #[cfg(feature = "parallel")]
+    let result = points.into_par_iter().filter_map(filter).collect(); 
+
+    result
 }
 
 #[cfg(test)]

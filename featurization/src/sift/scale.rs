@@ -47,7 +47,7 @@ pub fn compute_scale_space(image: Array<f32, Ix2>) -> ScaleSpace {
     let per_octave = gss.num_scales_per_octave + 3;
 
     for o in 0..gss.num_octaves {
-        println!("\t⌞ Generating octave #{}...", o);
+        println!("｜\t⌞ Generating octave #{}...", o);
         
         let dim = [per_octave as usize, seed.dim().0, seed.dim().1];
         let mut ss: Array<f32, Ix3> = Array::zeros(dim);

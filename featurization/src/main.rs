@@ -38,10 +38,10 @@ fn main() {
 
     let keypoints = refine_keypoints_with_low_contrast(&scales, &differences, keypoints);
     println!(
-        "\t⌞ After discarded low-contrast keypoints: {}",
+        "｜\t⌞ After discarded low-contrast keypoints: {}",
         keypoints.len()
     );
 
     let keypoints = refine_keypoints_on_edge(&differences, keypoints);
-    println!("\t⌞ After discarded keypoints on edge: {}", keypoints.len());
+    println!("｜\t⌞ After discarded keypoints on edge: {}", keypoints.len());
 }
